@@ -29,6 +29,8 @@ class PickerManager(private val context: Context, private val service: InputMeth
 
     private var inlineViewContainer: FrameLayout? = null
     private val pickerView: View
+    private var showing = false
+    private var requestedView: ViewType = ViewType.EMOJI
 
     private lateinit var contentArea: FrameLayout
     private lateinit var titleArea: TextView
@@ -54,6 +56,7 @@ class PickerManager(private val context: Context, private val service: InputMeth
         // Ensure pickerView is not attached to a different parent
         (pickerView.parent as? ViewGroup)?.removeView(pickerView)
         inlineViewContainer?.addView(pickerView)
+        applyToContainer()
     }
 
     fun handleKeyEvent(event: KeyEvent): Boolean {
@@ -166,31 +169,49 @@ class PickerManager(private val context: Context, private val service: InputMeth
     fun show(startingView: ViewType = ViewType.EMOJI) {
         initialPressComplete = false
         popupShownTime = System.currentTimeMillis()
-        if (!::contentArea.isInitialized) {
-            setupPickerView()
-        }
-        val height = (context.resources.displayMetrics.heightPixels / 2.25).toInt()
-        if (isShowing()) {
+        if (showing) {
             hide()
             return
         }
-        switchToView(startingView) // Default to emoji view
-        inlineViewContainer?.let {
-            val layoutParams = it.layoutParams
-            layoutParams.height = height
-            it.layoutParams = layoutParams
-            it.visibility = View.VISIBLE
-        }
+        showing = true
+        requestedView = startingView
+        applyToContainer()
         service.onPickerVisibilityChanged(true)
-        return
     }
 
     fun hide() {
-        if (!isShowing()) return
+        if (!showing) return
+        showing = false
         inlineViewContainer?.visibility = View.GONE
         // Ensure we exit any emoji meta shortcut mode used to open the picker
         service.resetEmojiMeta()
         service.onPickerVisibilityChanged(false)
+    }
+
+    /**
+     * Re-apply the requested picker once the IME input view exists.
+     * Password fields never open the suggestion bar, so the container is
+     * often attached only after [show] has already marked us visible.
+     */
+    fun ensureAttached() {
+        applyToContainer()
+    }
+
+    private fun applyToContainer() {
+        val container = inlineViewContainer ?: return
+        if (!showing) {
+            container.visibility = View.GONE
+            return
+        }
+        if (!::contentArea.isInitialized) {
+            setupPickerView()
+        }
+        switchToView(requestedView)
+        val height = (context.resources.displayMetrics.heightPixels / 2.25).toInt()
+        val layoutParams = container.layoutParams
+        layoutParams.height = height
+        container.layoutParams = layoutParams
+        container.visibility = View.VISIBLE
     }
 
     private fun setupPickerView() {
@@ -301,7 +322,7 @@ class PickerManager(private val context: Context, private val service: InputMeth
     }
 
     fun isShowing(): Boolean {
-        return inlineViewContainer?.visibility == View.VISIBLE
+        return showing
     }
 
     fun refreshSymbols() {

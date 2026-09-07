@@ -40,6 +40,8 @@ const val MP01_KEYCODE_EMOJI_PICKER = 666;
  */
 const val MP01_KEYCODE_DICTATE = 667;
 
+private const val IME_LOG = "SymKbd"
+
 // Only for modifier keys we want to force when using sym+keys to navigate.
 val forceModifierPairs = listOf(
 		KeyEvent.META_SHIFT_ON to KeyEvent.KEYCODE_SHIFT_LEFT,
@@ -234,6 +236,7 @@ class InputMethodService : AndroidInputMethodService() {
 	private var showToolbar = false
 	private var isInputViewActive = false
 	private var imeWindowBusy = false
+	private var pickerShowRequested = false
 	private var wordSuggestionsEnabled = true
 	private var suggestionsDismissed = false
 	private var aiCompleteEnabled = false
@@ -337,6 +340,7 @@ class InputMethodService : AndroidInputMethodService() {
 	}
 
 	override fun onCreateInputView(): View {
+		Log.i(IME_LOG, "onCreateInputView pickerShowing=${pickerManager?.isShowing()}")
 		mainInputView = layoutInflater.inflate(R.layout.input_view_container, null)
 
 		val pickerContainer = mainInputView?.findViewById<FrameLayout>(R.id.picker_container_inline)
@@ -435,20 +439,31 @@ class InputMethodService : AndroidInputMethodService() {
 		suggestionBarView?.visibility = if (shown) View.VISIBLE else View.GONE
 		if (shown) {
 			requestShowSelf(0)
+			setCandidatesViewShown(true)
+			return
 		}
-		setCandidatesViewShown(shown)
+		if (pickerWanted()) {
+			// Keep the IME window for the symbol/emoji grid. Calling
+			// setCandidatesViewShown(false) while the input view is not
+			// yet requested hideWindow()s and swallows the picker.
+			if (isInputViewActive) {
+				setCandidatesViewShown(false)
+			}
+			return
+		}
+		setCandidatesViewShown(false)
 	}
 
 	override fun onEvaluateFullscreenMode(): Boolean = false
 
 	override fun onEvaluateInputViewShown(): Boolean {
 		super.onEvaluateInputViewShown()
-		if (pickerManager?.isShowing() == true || showToolbar) return true
+		if (pickerWanted() || showToolbar) return true
 		return false
 	}
 
 	override fun onShowInputRequested(flags: Int, configChange: Boolean): Boolean {
-		if (pickerManager?.isShowing() == true || showToolbar) return true
+		if (pickerWanted() || showToolbar) return true
 		if (suggestionsEligible() || aiPromptOpen) return true
 		if ((flags and SHOW_FORCED) != 0) return true
 		return super.onShowInputRequested(flags, configChange)
@@ -457,6 +472,8 @@ class InputMethodService : AndroidInputMethodService() {
 	override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
 		super.onStartInputView(info, restarting)
 		isInputViewActive = true
+		pickerShowRequested = false
+		pickerManager?.ensureAttached()
 		updateStatusIconIfNeeded()
 		refreshSuggestions()
 	}
@@ -473,18 +490,30 @@ class InputMethodService : AndroidInputMethodService() {
 		openPicker(PickerManager.ViewType.CLIPBOARD)
 	}
 
+	private fun pickerWanted(): Boolean {
+		return pickerShowRequested || pickerManager?.isShowing() == true
+	}
+
 	/**
-	 * Mark the picker visible first, then request the IME window.
-	 * Password fields reject a show request when the suggestion bar is
-	 * ineligible; asking before the picker is open left the grid hidden.
+	 * Open the picker even when the suggestion bar is skipped (password,
+	 * email, URI). Those fields never create the IME window, so the grid
+	 * container does not exist until we force the input view up.
 	 */
 	private fun openPicker(type: PickerManager.ViewType) {
+		val wasShowing = pickerManager?.isShowing() == true
+		Log.i(IME_LOG, "openPicker $type wasShowing=$wasShowing hasInputView=${mainInputView != null} inputType=${currentInputEditorInfo?.inputType}")
 		pickerManager?.show(type)
 		if (pickerManager?.isShowing() == true) {
+			pickerShowRequested = true
+			showWindow(true)
 			requestShowSelf(SHOW_FORCED)
+			pickerManager?.ensureAttached()
 			updateInputViewShown()
-		} else {
+		} else if (wasShowing) {
 			updateInputViewShown()
+			if (!suggestionsEligible() && !showToolbar && !aiPromptOpen) {
+				requestHideSelf(0)
+			}
 		}
 	}
 
@@ -516,7 +545,7 @@ class InputMethodService : AndroidInputMethodService() {
 			caps.reset()
 			hangulComposer.reset(currentInputConnection)
 			updateStatusIconIfNeeded()
-			if (pickerManager?.isShowing() == true) {
+			if (pickerManager?.isShowing() == true && !pickerShowRequested) {
 				pickerManager?.hide()
 			}
 			closeAiPrompt()
@@ -635,6 +664,7 @@ class InputMethodService : AndroidInputMethodService() {
 			sym.get() && event.keyCode == KeyEvent.KEYCODE_SPACE &&
 			!event.isLongPress && event.repeatCount == 0
 		) {
+			Log.i(IME_LOG, "SYM+SPACE picker inputType=${currentInputEditorInfo?.inputType}")
 			showSymbolPicker()
 			sym.reset()
 			updateStatusIconIfNeeded(true)
@@ -1774,9 +1804,18 @@ class InputMethodService : AndroidInputMethodService() {
 	fun onPickerVisibilityChanged(showing: Boolean) {
 		if (imeWindowBusy) return
 		if (showing) {
-			setImeBarShown(false)
+			// Hide chips in-place. Do not call setImeBarShown(false):
+			// setCandidatesViewShown(false) hideWindow()s when the input
+			// view was never requested, which is the password-field case.
+			suggestionBarView?.visibility = View.GONE
+			if (isInputViewActive) {
+				setCandidatesViewShown(false)
+			}
 		} else {
 			refreshSuggestions()
+			if (!suggestionsEligible() && !showToolbar && !aiPromptOpen) {
+				requestHideSelf(0)
+			}
 		}
 		updateInputViewShown()
 	}
