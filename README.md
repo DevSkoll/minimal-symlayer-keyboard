@@ -18,6 +18,9 @@ This fork builds upon the original's solid foundation with several new features 
 * **Keyboard-Focused Emoji Picker**: A searchable emoji filter accessed by tapping the Emoji/0 key.
 * **Clipboard History**: A clipboard manager with search and pinning, accessed via Emoji/0 + V.
 * **Sym-Layer Preview**: A visual preview of the Sym layer mappings, making it easy to discover and learn.
+* **On-device word suggestions**: A bottom suggestion bar with a bundled English dictionary. Idle chips predict the next word; while typing they complete the current word (or the closest dictionary word for a one-letter typo). Tap a chip to insert it. Autocorrect stays off. Local learning stays in app-private storage and is excluded from backup.
+* **Suggestion bar does not cover compose fields**: The bar is an IME candidates view, so messaging apps resize above it. Back hides the bar; typing brings it back. SYM+Space opens the on-screen symbol grid on the MP01.
+* **Optional AI complete**: Off by default. If you set an HTTPS endpoint in settings, an AI chip appears on the bar. Nothing is sent unless you tap it. Point it at your own local API ([keyboard-ai](https://github.com/DevSkoll/keyboard-ai)) or leave it empty.
 * **Advanced Key Support for MP01**: Added support for the Minimal Phone's key layout, adding additional functionality over the factory keyboard:
     * **Three-Way Modifier Keys**: The Mic/Period and Emoji/0 keys act as multi-function modifiers:
         * **Mic/Period Key**:
@@ -35,10 +38,13 @@ The Multipress for accented characters feature from the original project is disa
 
 ## Installation
 
-1. Download the latest APK from the [releases](https://github.com/rickybrent/minimal-symlayer-keyboard/releases) page.
+This MP01-oriented fork is maintained by Dev_Skoll. Upstream is [rickybrent/minimal-symlayer-keyboard](https://github.com/rickybrent/minimal-symlayer-keyboard).
+
+1. Download the latest APK from the [releases](https://github.com/DevSkoll/minimal-symlayer-keyboard/releases) page, or build `assembleRelease` in this tree.
 2. Install the APK on your Minimal Phone MP01.
 3. Go to `Settings` > `System` > `Languages & input` > `Virtual keyboard` > `Manage keyboards` and enable `Minimal Symlayer Input`.
 4. Select `Minimal Symlayer Input` as your default input method.
+5. For a hardware keyboard, enable **Show virtual keyboard** / IME-with-hardware-keyboard so the suggestion bar can appear (`settings put secure show_ime_with_hard_keyboard 1` via adb).
 
 
 

@@ -15,6 +15,27 @@
 			android:summary="Type two spaces in sequence to create a period"
 			app:widgetLayout="@layout/settings_widget_switch"
 			/>
+		<SwitchPreference
+			android:key="WordSuggestions"
+			android:defaultValue="true"
+			android:title="Word suggestions"
+			android:summary="On-device next-word predictions and completions (including close typos). Tap a word to insert it. Autocorrect stays off."
+			app:widgetLayout="@layout/settings_widget_switch"
+			/>
+		<SwitchPreference
+			android:key="AiComplete"
+			android:defaultValue="false"
+			android:title="AI complete"
+			android:summary="Show an AI chip on the suggestion bar. Tap it to send the current field to your own HTTPS endpoint. Nothing is sent unless you tap, and the chip stays hidden until an endpoint is set."
+			app:widgetLayout="@layout/settings_widget_switch"
+			/>
+		<EditTextPreference
+			android:key="AiCompleteEndpoint"
+			android:defaultValue=""
+			android:title="AI endpoint"
+			android:summary="Optional HTTPS URL for AI complete (leave empty to disable)"
+			android:inputType="textUri"
+			/>
 	</PreferenceCategory>
 	<PreferenceCategory android:title="Special Keys" >
 		<Preference

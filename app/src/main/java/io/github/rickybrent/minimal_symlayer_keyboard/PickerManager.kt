@@ -72,6 +72,10 @@ class PickerManager(private val context: Context, private val service: InputMeth
         }
 
         if (event.action == KeyEvent.ACTION_UP && keyCode == KeyEvent.KEYCODE_SYM) {
+            if (!initialPressComplete && System.currentTimeMillis() - popupShownTime < 1000) {
+                initialPressComplete = true
+                return true
+            }
             if (currentView == ViewType.SYMBOL)
                 hide()
             else
@@ -177,13 +181,16 @@ class PickerManager(private val context: Context, private val service: InputMeth
             it.layoutParams = layoutParams
             it.visibility = View.VISIBLE
         }
+        service.onPickerVisibilityChanged(true)
         return
     }
 
     fun hide() {
+        if (!isShowing()) return
         inlineViewContainer?.visibility = View.GONE
         // Ensure we exit any emoji meta shortcut mode used to open the picker
         service.resetEmojiMeta()
+        service.onPickerVisibilityChanged(false)
     }
 
     private fun setupPickerView() {

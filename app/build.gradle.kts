@@ -5,14 +5,14 @@ plugins {
 
 android {
 	namespace = "io.github.rickybrent.minimal_symlayer_keyboard"
-	compileSdk = 34
+	compileSdk = 36
 
 	defaultConfig {
 		applicationId = "io.github.rickybrent.minimal_symlayer_keyboard"
 		minSdk = 29
 		targetSdk = 33
 		versionCode = 1
-		versionName = "0.84"
+		versionName = "0.99"
 		testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 	}
 

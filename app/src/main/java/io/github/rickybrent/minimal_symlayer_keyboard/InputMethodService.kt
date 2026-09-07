@@ -16,13 +16,17 @@ import android.view.InputDevice
 import android.view.KeyCharacterMap
 import android.view.KeyEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethod.SHOW_FORCED
 import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import android.widget.ImageView
+import android.widget.EditText
+import android.widget.TextView
 import android.widget.Toast
 import androidx.preference.PreferenceManager
+import java.io.File
 import java.util.Locale
 import android.inputmethodservice.InputMethodService as AndroidInputMethodService
 
@@ -201,6 +205,7 @@ class InputMethodService : AndroidInputMethodService() {
 	private lateinit var vibrator: Vibrator
 	private var pickerManager: PickerManager? = null
 	private var mainInputView: View? = null
+	private var suggestionBarView: View? = null
 	private var inputViewStrip: View? = null
 	private var stripStatusIcon: ImageView? = null
 
@@ -228,6 +233,27 @@ class InputMethodService : AndroidInputMethodService() {
 	private var autoCapitalize = false
 	private var showToolbar = false
 	private var isInputViewActive = false
+	private var imeWindowBusy = false
+	private var wordSuggestionsEnabled = true
+	private var suggestionsDismissed = false
+	private var aiCompleteEnabled = false
+	private var aiCompleteEndpoint = ""
+	private var wordDictionary: WordDictionary? = null
+	private var userLexicon: UserLexicon? = null
+	private var suggestionEngine: SuggestionEngine? = null
+	private val keyboardAiClient = KeyboardAiClient()
+	private var suggestionButtons: Array<TextView>? = null
+	private var aiButton: TextView? = null
+	private var aiPromptPanel: View? = null
+	private var aiPromptText: EditText? = null
+	private var aiPromptStatus: TextView? = null
+	private var suggestionRow: View? = null
+	private var displayedSuggestions: List<String> = emptyList()
+	private var displayedPrefix: String = ""
+	private var aiBusy = false
+	private var aiPromptOpen = false
+	private var aiMode: String? = null
+	private val aiPromptBuffer = StringBuilder()
 
 	enum class DeviceType(val source: Int) {
 		TITAN(InputDevice.SOURCE_KEYBOARD),
@@ -291,6 +317,7 @@ class InputMethodService : AndroidInputMethodService() {
 			updateFromPreferences()
 		}
 		updateFromPreferences()
+		loadWordSuggestions(context)
 		val filter = IntentFilter(Intent.ACTION_USER_UNLOCKED)
 		registerReceiver(unlockReceiver, filter)
 
@@ -324,15 +351,123 @@ class InputMethodService : AndroidInputMethodService() {
 		return mainInputView!!
 	}
 
+	private fun bindSuggestionBar(bar: View) {
+		val buttons = arrayOf(
+			bar.findViewById<TextView>(R.id.suggestion_0),
+			bar.findViewById<TextView>(R.id.suggestion_1),
+			bar.findViewById<TextView>(R.id.suggestion_2)
+		)
+		buttons.forEachIndexed { index, view ->
+			view.setOnClickListener { applySuggestion(index) }
+		}
+		suggestionButtons = buttons
+		aiButton = bar.findViewById(R.id.suggestion_ai)
+		aiButton?.setOnClickListener { requestAiComplete() }
+		aiPromptPanel = bar.findViewById(R.id.ai_prompt_panel)
+		aiPromptText = bar.findViewById(R.id.ai_prompt_text)
+		aiPromptStatus = bar.findViewById(R.id.ai_prompt_status)
+		suggestionRow = bar.findViewById(R.id.suggestion_row)
+		aiPromptText?.showSoftInputOnFocus = false
+		aiPromptText?.setOnKeyListener { _, _, _ -> true }
+		bar.findViewById<TextView>(R.id.ai_prompt_cancel).setOnClickListener { closeAiPrompt() }
+		bar.findViewById<TextView>(R.id.ai_prompt_rewrite).setOnClickListener { armOrSubmitAi(rewrite = true) }
+		bar.findViewById<TextView>(R.id.ai_prompt_go).setOnClickListener { armOrSubmitAi(rewrite = false) }
+	}
+
+	override fun onCreateCandidatesView(): View {
+		val bar = layoutInflater.inflate(R.layout.suggestion_bar, null)
+		bindSuggestionBar(bar)
+		suggestionBarView = bar
+		return bar
+	}
+
+	override fun onComputeInsets(outInsets: Insets) {
+		super.onComputeInsets(outInsets)
+		val screenH = resources.displayMetrics.heightPixels
+		val chromeH = visibleImeChromeHeight()
+		if (chromeH <= 0) {
+			outInsets.contentTopInsets = screenH
+			outInsets.visibleTopInsets = screenH
+			return
+		}
+		val target = when {
+			pickerManager?.isShowing() == true ->
+				mainInputView?.findViewById(R.id.picker_container_inline) ?: mainInputView
+			suggestionBarView?.visibility == View.VISIBLE -> suggestionBarView
+			showToolbar -> inputViewStrip
+			else -> mainInputView
+		}
+		val loc = IntArray(2)
+		target?.getLocationInWindow(loc)
+		val windowH = target?.rootView?.height?.takeIf { it > 0 } ?: screenH
+		var top = loc[1]
+		if (top <= 0 || windowH - top < chromeH / 2) {
+			top = (windowH - chromeH).coerceAtLeast(0)
+		}
+		outInsets.contentTopInsets = top
+		outInsets.visibleTopInsets = top
+		outInsets.touchableInsets = Insets.TOUCHABLE_INSETS_VISIBLE
+	}
+
+	private fun visibleImeChromeHeight(): Int {
+		var height = 0
+		if (pickerManager?.isShowing() == true) {
+			val picker = mainInputView?.findViewById<View>(R.id.picker_container_inline)
+			height += picker?.height?.takeIf { it > 0 }
+				?: (resources.displayMetrics.heightPixels / 2.25).toInt()
+		}
+		if (showToolbar) {
+			height += inputViewStrip?.height?.takeIf { it > 0 }
+				?: inputViewStrip?.minimumHeight?.takeIf { it > 0 }
+				?: (48 * resources.displayMetrics.density).toInt()
+		}
+		if (suggestionBarView?.visibility == View.VISIBLE) {
+			val bar = suggestionBarView!!
+			height += bar.height.takeIf { it > 0 }
+				?: bar.minimumHeight.takeIf { it > 0 }
+				?: (49 * resources.displayMetrics.density).toInt()
+		}
+		return height
+	}
+
+	private fun setImeBarShown(shown: Boolean) {
+		if (imeWindowBusy) return
+		suggestionBarView?.visibility = if (shown) View.VISIBLE else View.GONE
+		if (shown) {
+			requestShowSelf(0)
+		}
+		setCandidatesViewShown(shown)
+	}
+
+	override fun onEvaluateFullscreenMode(): Boolean = false
+
+	override fun onEvaluateInputViewShown(): Boolean {
+		super.onEvaluateInputViewShown()
+		if (pickerManager?.isShowing() == true || showToolbar) return true
+		return false
+	}
+
+	override fun onShowInputRequested(flags: Int, configChange: Boolean): Boolean {
+		if (pickerManager?.isShowing() == true || showToolbar) return true
+		if (suggestionsEligible() || aiPromptOpen) return true
+		return super.onShowInputRequested(flags, configChange)
+	}
+
 	override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
 		super.onStartInputView(info, restarting)
 		isInputViewActive = true
 		updateStatusIconIfNeeded()
+		refreshSuggestions()
 	}
 
 	private fun showEmojiPicker() {
 		if (isInputViewActive.not()) requestShowSelf(SHOW_FORCED)
 		pickerManager?.show()
+	}
+
+	private fun showSymbolPicker() {
+		if (isInputViewActive.not()) requestShowSelf(SHOW_FORCED)
+		pickerManager?.show(PickerManager.ViewType.SYMBOL)
 	}
 
 	private fun showClipboardHistory() {
@@ -347,10 +482,12 @@ class InputMethodService : AndroidInputMethodService() {
 
 		// Reset Hangul composer when starting input
 		hangulComposer.reset(currentInputConnection)
+		suggestionsDismissed = false
 
 		if(!sym.get()) {
 			updateAutoCapitalization()
 		}
+		refreshSuggestions()
 	}
 
 	/**
@@ -358,14 +495,21 @@ class InputMethodService : AndroidInputMethodService() {
 	 * Prevents auto-caps's icon from appearing when no text input is active.
 	 */
 	override fun onFinishInputView(finishingInput: Boolean) {
-		super.onFinishInputView(finishingInput)
-		isInputViewActive = false
-		shift.reset()
-		caps.reset()
-		// Ensure composer state cleared
-		hangulComposer.reset(currentInputConnection)
-		updateStatusIconIfNeeded()
-		pickerManager?.hide()
+		imeWindowBusy = true
+		try {
+			super.onFinishInputView(finishingInput)
+			isInputViewActive = false
+			shift.reset()
+			caps.reset()
+			hangulComposer.reset(currentInputConnection)
+			updateStatusIconIfNeeded()
+			if (pickerManager?.isShowing() == true) {
+				pickerManager?.hide()
+			}
+			closeAiPrompt()
+		} finally {
+			imeWindowBusy = false
+		}
 	}
 
 	override fun onUpdateSelection(
@@ -379,6 +523,7 @@ class InputMethodService : AndroidInputMethodService() {
 		if(!sym.get()) {
 			updateAutoCapitalization()
 		}
+		refreshSuggestions()
 
 		super.onUpdateSelection(
 			oldSelStart,
@@ -395,7 +540,15 @@ class InputMethodService : AndroidInputMethodService() {
 			pickerManager!!.handleKeyEvent(event) // always eat
 			return true
 		} else if (event.keyCode == KeyEvent.KEYCODE_BACK) {
-			// directly send to the app instead of dismissing our (invisible) keyboard.
+			if (aiPromptOpen) {
+				closeAiPrompt()
+				return true
+			}
+			if (!suggestionsDismissed && (wordSuggestionsEnabled || aiCompleteEnabled)) {
+				suggestionsDismissed = true
+				setImeBarShown(false)
+				return true
+			}
 			sendDownUpKeyEvents(event.keyCode)
 			return true
 		}
@@ -444,12 +597,34 @@ class InputMethodService : AndroidInputMethodService() {
 			}
 		}
 
+		if (aiPromptOpen) {
+			return handleAiPromptKey(event)
+		}
+
+		if (suggestionsDismissed &&
+			(event.isPrintingKey || event.keyCode == KeyEvent.KEYCODE_SPACE ||
+				event.keyCode == KeyEvent.KEYCODE_DEL)
+		) {
+			suggestionsDismissed = false
+			refreshSuggestions()
+		}
+
 		if(event.isCtrlPressed) {
 			return super.onKeyDown(keyCode, event)
 		}
 
 		// Apply any special logic for triple modifiers that may modify key handling.
 		if (tripleModifierOnKeyDown(keyCode, event)) {
+			return true
+		}
+
+		if (deviceType == DeviceType.MP01 &&
+			sym.get() && event.keyCode == KeyEvent.KEYCODE_SPACE &&
+			!event.isLongPress && event.repeatCount == 0
+		) {
+			showSymbolPicker()
+			sym.reset()
+			updateStatusIconIfNeeded(true)
 			return true
 		}
 
@@ -526,7 +701,9 @@ class InputMethodService : AndroidInputMethodService() {
 			}
 			consumeModifierNext()
 
-			return super.onKeyDown(keyCode, event)
+			val handled = super.onKeyDown(keyCode, event)
+			refreshSuggestions()
+			return handled
 		}
 
 		// Ignore all long presses after this point
@@ -588,6 +765,7 @@ class InputMethodService : AndroidInputMethodService() {
 				event.getUnicodeChar(enhancedMetaState(event)).toChar().toString()
 			}
 			currentInputConnection?.commitText(str, 1)
+			onCommittedText(str)
 
 			consumeModifierNext()
 			return true
@@ -651,13 +829,20 @@ class InputMethodService : AndroidInputMethodService() {
 	 * Overridden to ensure the input view is shown when our inline picker is active,
 	 * even when a hardware keyboard is connected.
 	 */
-	override fun onEvaluateInputViewShown(): Boolean {
-		return true || super.onEvaluateInputViewShown()
-	}
-
 	override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
 		if (isInputViewActive && pickerManager?.isShowing() == true) {
 			pickerManager!!.handleKeyEvent(event) // always eat
+			return true
+		}
+		if (aiPromptOpen &&
+			event.keyCode != KeyEvent.KEYCODE_SHIFT_LEFT &&
+			event.keyCode != KeyEvent.KEYCODE_SHIFT_RIGHT &&
+			event.keyCode != KeyEvent.KEYCODE_ALT_LEFT &&
+			event.keyCode != KeyEvent.KEYCODE_ALT_RIGHT &&
+			event.keyCode != KeyEvent.KEYCODE_SYM &&
+			event.keyCode != MP01_KEYCODE_DICTATE &&
+			event.keyCode != MP01_KEYCODE_EMOJI_PICKER
+		) {
 			return true
 		}
 
@@ -899,6 +1084,7 @@ class InputMethodService : AndroidInputMethodService() {
 			text = text.uppercase(Locale.getDefault())
 		}
 		currentInputConnection?.commitText(text, 1)
+		onCommittedText(text)
 	}
 
 	private fun simulateKeyTap(code: Int, original: KeyEvent, metaState: Int) {
@@ -911,6 +1097,11 @@ class InputMethodService : AndroidInputMethodService() {
 		} else if (code == KeyEvent.KEYCODE_VOICE_ASSIST) {
 			startVoiceInput()
 			dotCtrl.reset()
+			return
+		}
+		if (koreanInput.isActive() && hangulComposer.isComposing() && code == KeyEvent.KEYCODE_PERIOD) {
+			hangulComposer.commitComposingText(currentInputConnection)
+			currentInputConnection?.commitText(".", 1)
 			return
 		}
 		val event = makeKeyEvent(original, code, metaState, original.action, original.source, original.deviceId)
@@ -1086,6 +1277,12 @@ class InputMethodService : AndroidInputMethodService() {
 		this.inputViewStrip?.visibility = if (showToolbar) View.VISIBLE else View.GONE
 
 		autoCapitalize = preferences.getBoolean("AutoCapitalize", true)
+		wordSuggestionsEnabled = preferences.getBoolean("WordSuggestions", true)
+		aiCompleteEnabled = preferences.getBoolean("AiComplete", false)
+		aiCompleteEndpoint = preferences.getString("AiCompleteEndpoint", "") ?: ""
+		if (aiCompleteEndpoint.startsWith("http://")) {
+			aiCompleteEndpoint = "https://" + aiCompleteEndpoint.removePrefix("http://")
+		}
 
 		val lockThreshold = preferences.getInt("ModifierLockThreshold", 250)
 		shift.lockThreshold = lockThreshold
@@ -1097,7 +1294,7 @@ class InputMethodService : AndroidInputMethodService() {
 		alt.nextThreshold = nextThreshold
 
 		multipress.multipressThreshold = preferences.getInt("MultipressThreshold", 750)
-		multipress.ignoreFirstLevel = !preferences.getBoolean("UseFirstLevel", true)
+		multipress.ignoreFirstLevel = !preferences.getBoolean("UseFirstLevel", false)
 		multipress.ignoreDotSpace = !preferences.getBoolean("DotSpace", true)
 		multipress.ignoreConsonantsOnFirstLevel = preferences.getBoolean("FirstLevelOnlyVowels", false)
 		multipress.ligaturesEnabled = preferences.getBoolean("pref_enable_ligatures", false)
@@ -1122,7 +1319,7 @@ class InputMethodService : AndroidInputMethodService() {
 			hangulComposer.reset(currentInputConnection)
 		}
 
-		val templateId = preferences.getString("FirstLevelTemplate", "fr")
+		val templateId = preferences.getString("FirstLevelTemplate", "fr-ext")
 		if(templates.containsKey(templateId)) {
 			multipress.substitutions[0] = templates[templateId]!!
 		}
@@ -1200,6 +1397,356 @@ class InputMethodService : AndroidInputMethodService() {
 		}
 	}
 
+	private fun loadWordSuggestions(context: android.content.Context) {
+		if (wordDictionary != null) return
+		try {
+			wordDictionary = resources.openRawResource(R.raw.en_unigrams).bufferedReader().use { unigrams ->
+				resources.openRawResource(R.raw.en_bigrams).bufferedReader().use { bigrams ->
+					WordDictionary.load(unigrams.lineSequence(), bigrams.lineSequence())
+				}
+			}
+			userLexicon = UserLexicon(File(context.filesDir, "user_lexicon.txt"))
+			suggestionEngine = SuggestionEngine(wordDictionary!!) { word -> userLexicon?.boost(word) ?: 0 }
+		} catch (e: Exception) {
+			Log.w(packageName, "Word suggestions dictionary failed to load", e)
+			wordDictionary = null
+			suggestionEngine = null
+		}
+	}
+
+	private fun suggestionsEligible(): Boolean {
+		if (!wordSuggestionsEnabled && !aiCompleteEnabled) return false
+		if (koreanInput.isActive() || cyrillicLayer.isActive()) return false
+		if (pickerManager?.isShowing() == true) return false
+		val info = currentInputEditorInfo ?: return false
+		return canUseSuggestions(info)
+	}
+
+	private fun refreshSuggestions() {
+		if (suggestionsDismissed && !aiPromptOpen) {
+			setImeBarShown(false)
+			return
+		}
+		if (!suggestionsEligible()) {
+			displayedSuggestions = emptyList()
+			displayedPrefix = ""
+			if (!aiPromptOpen) setImeBarShown(false)
+			return
+		}
+		if (aiPromptOpen) {
+			aiPromptPanel?.visibility = View.VISIBLE
+			suggestionRow?.visibility = View.GONE
+			setImeBarShown(true)
+			return
+		}
+		val before = currentInputConnection?.getTextBeforeCursor(64, 0)
+		val prefix = SuggestionEngine.currentPrefix(before)
+		val previous = SuggestionEngine.previousWord(before)
+		val raw = if (wordSuggestionsEnabled) {
+			suggestionEngine?.suggest(prefix, previous, 3) ?: emptyList()
+		} else {
+			emptyList()
+		}
+		val capsMode = currentInputConnection?.getCursorCapsMode(TextUtils.CAP_MODE_SENTENCES) ?: 0
+		val cased = raw.map { SuggestionEngine.applyCase(it, prefix, prefix.isEmpty() && capsMode > 0) }
+		displayedPrefix = prefix
+		displayedSuggestions = cased
+		val buttons = suggestionButtons
+		if (buttons != null) {
+			for (i in buttons.indices) {
+				val button = buttons[i]
+				if (i < cased.size) {
+					button.text = cased[i]
+					button.visibility = View.VISIBLE
+				} else {
+					button.text = ""
+					button.visibility = View.INVISIBLE
+				}
+			}
+		}
+		suggestionRow?.visibility = View.VISIBLE
+		aiButton?.visibility =
+			if (aiCompleteEnabled && aiCompleteEndpoint.isNotBlank()) View.VISIBLE else View.GONE
+		aiButton?.text = "AI"
+		setImeBarShown(true)
+	}
+
+	private fun requestAiComplete() {
+		if (!aiCompleteEnabled || aiBusy) return
+		if (!suggestionsEligible()) return
+		if (!aiPromptOpen) {
+			openAiPrompt()
+			return
+		}
+		armOrSubmitAi(rewrite = false)
+	}
+
+	private fun openAiPrompt() {
+		aiPromptOpen = true
+		aiBusy = false
+		aiMode = null
+		suggestionsDismissed = false
+		aiPromptBuffer.clear()
+		aiPromptPanel?.visibility = View.VISIBLE
+		suggestionRow?.visibility = View.GONE
+		aiPromptStatus?.visibility = View.GONE
+		aiPromptStatus?.text = ""
+		aiPromptText?.hint = "Rewrite or Go, then type"
+		aiPromptText?.setText("")
+		aiPromptText?.isCursorVisible = true
+		aiPromptText?.requestFocus()
+		updateAiPromptDisplay()
+		setImeBarShown(true)
+	}
+
+	private fun closeAiPrompt() {
+		aiPromptOpen = false
+		aiBusy = false
+		aiMode = null
+		aiPromptBuffer.clear()
+		aiPromptPanel?.visibility = View.GONE
+		suggestionRow?.visibility = View.VISIBLE
+		aiPromptStatus?.visibility = View.GONE
+		refreshSuggestions()
+	}
+
+	private fun setAiPromptStatus(message: String?) {
+		if (message.isNullOrEmpty()) {
+			aiPromptStatus?.text = ""
+			aiPromptStatus?.visibility = View.GONE
+		} else {
+			aiPromptStatus?.text = message
+			aiPromptStatus?.visibility = View.VISIBLE
+		}
+	}
+
+	private fun updateAiPromptDisplay() {
+		val edit = aiPromptText ?: return
+		val typed = aiPromptBuffer.toString()
+		if (edit.text.toString() != typed) {
+			edit.setText(typed)
+		}
+		val pos = typed.length
+		if (edit.selectionStart != pos || edit.selectionEnd != pos) {
+			edit.setSelection(pos)
+		}
+		edit.isCursorVisible = true
+		if (!edit.hasFocus()) edit.requestFocus()
+	}
+
+	private fun appendToPrompt(str: String) {
+		if (str.isEmpty() || aiBusy) return
+		aiPromptBuffer.append(str)
+		updateAiPromptDisplay()
+		consumeModifierNext()
+	}
+
+	private fun deleteFromPrompt() {
+		if (aiPromptBuffer.isEmpty()) return
+		val last = aiPromptBuffer.offsetByCodePoints(aiPromptBuffer.length, -1)
+		aiPromptBuffer.delete(last, aiPromptBuffer.length)
+		updateAiPromptDisplay()
+	}
+
+	private fun handleAiPromptKey(event: KeyEvent): Boolean {
+		when (event.keyCode) {
+			KeyEvent.KEYCODE_SHIFT_LEFT, KeyEvent.KEYCODE_SHIFT_RIGHT,
+			KeyEvent.KEYCODE_ALT_LEFT, KeyEvent.KEYCODE_ALT_RIGHT,
+			KeyEvent.KEYCODE_SYM -> return true
+			KeyEvent.KEYCODE_ENTER -> {
+				if (event.repeatCount == 0) {
+					armOrSubmitAi(rewrite = aiMode == "rewrite")
+				}
+				return true
+			}
+			KeyEvent.KEYCODE_DEL, KeyEvent.KEYCODE_FORWARD_DEL -> {
+				deleteFromPrompt()
+				return true
+			}
+		}
+
+		if (event.isLongPress || (event.repeatCount > 0 &&
+				event.keyCode != KeyEvent.KEYCODE_DEL)
+		) {
+			return true
+		}
+
+		if (event.keyCode == MP01_KEYCODE_EMOJI_PICKER) {
+			if (alt.get()) {
+				appendToPrompt("0")
+			}
+			return true
+		}
+		if (event.keyCode == MP01_KEYCODE_DICTATE) {
+			appendToPrompt(".")
+			return true
+		}
+
+		if (sym.get()) {
+			val mapping = SymKeyMappings.getMapping(event.keyCode, deviceType)
+			when (val action = mapping?.action) {
+				is SendChar -> {
+					val ch = if ((shift.get() || caps.get()) && action.shiftedCharacter != null) {
+						action.shiftedCharacter
+					} else {
+						action.character
+					}
+					appendToPrompt(ch)
+				}
+				is SendKey -> if (action.keyCode == KeyEvent.KEYCODE_TAB) {
+					appendToPrompt("\t")
+				}
+				else -> { }
+			}
+			return true
+		}
+
+		val isShifted = shift.get() || caps.get()
+		if (alt.get() && (event.isPrintingKey || event.keyCode == KeyEvent.KEYCODE_SPACE ||
+				event.keyCode == MP01_KEYCODE_EMOJI_PICKER)
+		) {
+			val altChar = AltKeyMappings.getAltKeyChar(event.keyCode, isShifted)
+			if (altChar != null) {
+				appendToPrompt(altChar.toString())
+				return true
+			}
+		}
+
+		if (event.isPrintingKey || event.keyCode == KeyEvent.KEYCODE_SPACE) {
+			if (!koreanInput.isActive()) {
+				val subst = multipress.process(event, enhancedMetaState(event))
+				if (subst != MPSUBST_BYPASS) {
+					if (subst != MPSUBST_NOTHING) {
+						when (subst) {
+							MPSUBST_STR_DOTSPACE -> {
+								deleteFromPrompt()
+								appendToPrompt(". ")
+							}
+							else -> {
+								deleteFromPrompt()
+								var text = subst.toString()
+								if (shift.get() || caps.get()) {
+									text = text.uppercase(Locale.getDefault())
+								}
+								appendToPrompt(text)
+							}
+						}
+					}
+					return true
+				}
+			}
+			val ch = event.getUnicodeChar(enhancedMetaState(event))
+			if (ch != 0 && ch != '\b'.code) {
+				appendToPrompt(ch.toChar().toString())
+			} else if (event.keyCode == KeyEvent.KEYCODE_SPACE) {
+				appendToPrompt(" ")
+			}
+			return true
+		}
+		return true
+	}
+
+	private fun armOrSubmitAi(rewrite: Boolean) {
+		if (aiBusy) return
+		aiMode = if (rewrite) "rewrite" else "generate"
+		val prompt = aiPromptBuffer.toString().trim()
+		if (prompt.isEmpty()) {
+			aiPromptText?.hint = if (rewrite) {
+				"How should we rewrite this?"
+			} else {
+				"What should we write?"
+			}
+			setAiPromptStatus(
+				if (rewrite) "Rewrite — type how, then Rewrite or Enter"
+				else "Go — type what you want, then Go or Enter"
+			)
+			aiPromptText?.requestFocus()
+			return
+		}
+		submitAiPrompt(rewrite)
+	}
+
+	private fun submitAiPrompt(rewrite: Boolean) {
+		if (aiBusy) return
+		val prompt = aiPromptBuffer.toString().trim()
+		if (prompt.isEmpty()) {
+			setAiPromptStatus("Type a prompt first")
+			updateAiPromptDisplay()
+			return
+		}
+		val ic = currentInputConnection
+		val before = ic?.getTextBeforeCursor(4000, 0)?.toString().orEmpty()
+		val after = ic?.getTextAfterCursor(4000, 0)?.toString().orEmpty()
+		val field = before + after
+		if (rewrite && field.isBlank()) {
+			setAiPromptStatus("Nothing to rewrite")
+			return
+		}
+		aiBusy = true
+		setAiPromptStatus(if (rewrite) "Rewriting…" else "Working…")
+		keyboardAiClient.complete(
+			aiCompleteEndpoint,
+			if (rewrite) field else before,
+			prompt,
+			if (rewrite) "rewrite" else "generate",
+			onResult = { raw ->
+				aiBusy = false
+				if (rewrite) {
+					val replacement = raw.trim()
+					ic?.beginBatchEdit()
+					ic?.deleteSurroundingText(before.length, after.length)
+					ic?.commitText(replacement, 1)
+					ic?.endBatchEdit()
+				} else {
+					ic?.commitText(formatAiInsertion(before, raw), 1)
+				}
+				closeAiPrompt()
+			},
+			onError = { message ->
+				aiBusy = false
+				setAiPromptStatus(message)
+				updateAiPromptDisplay()
+			}
+		)
+	}
+
+	private fun formatAiInsertion(before: String, raw: String): String {
+		var text = raw.trim()
+		if (text.startsWith("\"") && text.endsWith("\"") && text.length > 1) {
+			text = text.substring(1, text.length - 1).trim()
+		}
+		if (before.isNotEmpty() && before.last().isLetterOrDigit() &&
+			text.isNotEmpty() && text.first().isLetterOrDigit()
+		) {
+			text = " $text"
+		}
+		return text
+	}
+
+	private fun applySuggestion(index: Int) {
+		val word = displayedSuggestions.getOrNull(index) ?: return
+		val ic = currentInputConnection ?: return
+		val prefix = displayedPrefix
+		ic.beginBatchEdit()
+		if (prefix.isNotEmpty()) {
+			ic.deleteSurroundingText(prefix.length, 0)
+		}
+		ic.commitText("$word ", 1)
+		ic.endBatchEdit()
+		userLexicon?.record(word)
+		consumeModifierNext()
+		refreshSuggestions()
+	}
+
+	private fun onCommittedText(text: String) {
+		if (text.isNotEmpty() && !text[0].isLetter()) {
+			val before = currentInputConnection?.getTextBeforeCursor(64, 0)
+			val word = SuggestionEngine.previousWord(before)
+			if (word.length >= 2) userLexicon?.record(word)
+		}
+		refreshSuggestions()
+	}
+
 	fun clearModifiers() {
 		shift.reset()
 		alt.reset()
@@ -1211,6 +1758,15 @@ class InputMethodService : AndroidInputMethodService() {
 		updateStatusIconIfNeeded(true)
 	}
 
+	fun onPickerVisibilityChanged(showing: Boolean) {
+		if (imeWindowBusy) return
+		if (showing) {
+			setImeBarShown(false)
+		} else {
+			refreshSuggestions()
+		}
+	}
+
 	/**
 	 * Reset only the Emoji Meta modifier state and refresh the status icon.
 	 *
@@ -1219,6 +1775,7 @@ class InputMethodService : AndroidInputMethodService() {
 	 * emoji meta shortcut (e.g., emoji + space), the modifier could remain
 	 * latched, keeping the keyboard in the shortcut mode.
 	 */
+
 	fun resetEmojiMeta() {
 		emojiMeta.reset()
 		updateStatusIconIfNeeded(true)

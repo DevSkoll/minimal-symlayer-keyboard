@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+	android:id="@+id/suggestion_bar"
+	android:layout_width="match_parent"
+	android:layout_height="wrap_content"
+	android:minHeight="49dp"
+	android:background="@android:color/white"
+	android:orientation="vertical">
+
+	<View
+		android:layout_width="match_parent"
+		android:layout_height="1dp"
+		android:background="@android:color/black" />
+
+	<LinearLayout
+		android:id="@+id/ai_prompt_panel"
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:orientation="vertical"
+		android:paddingStart="8dp"
+		android:paddingEnd="8dp"
+		android:paddingTop="6dp"
+		android:paddingBottom="4dp"
+		android:visibility="gone">
+
+		<TextView
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:text="AI prompt — type, Enter to send, Back to cancel"
+			android:textColor="@android:color/black"
+			android:textSize="12sp" />
+
+		<EditText
+			android:id="@+id/ai_prompt_text"
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:layout_marginTop="4dp"
+			android:background="@drawable/suggestion_chip"
+			android:cursorVisible="true"
+			android:focusable="true"
+			android:focusableInTouchMode="true"
+			android:gravity="start|top"
+			android:hint="Type your prompt"
+			android:imeOptions="flagNoExtractUi|flagNoFullscreen|actionGo"
+			android:inputType="text|textCapSentences|textMultiLine"
+			android:minHeight="48dp"
+			android:padding="8dp"
+			android:textColor="@android:color/black"
+			android:textColorHint="#FF666666"
+			android:textCursorDrawable="@null"
+			android:textSize="16sp" />
+
+		<TextView
+			android:id="@+id/ai_prompt_status"
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:layout_marginTop="2dp"
+			android:textColor="@android:color/black"
+			android:textSize="12sp"
+			android:visibility="gone" />
+
+		<LinearLayout
+			android:layout_width="match_parent"
+			android:layout_height="44dp"
+			android:layout_marginTop="6dp"
+			android:orientation="horizontal">
+
+			<TextView
+				android:id="@+id/ai_prompt_cancel"
+				android:layout_width="0dp"
+				android:layout_height="match_parent"
+				android:layout_marginEnd="4dp"
+				android:layout_weight="1"
+				android:background="@drawable/suggestion_chip"
+				android:clickable="true"
+				android:focusable="true"
+				android:gravity="center"
+				android:text="Cancel"
+				android:textColor="@android:color/black"
+				android:textSize="14sp" />
+
+			<TextView
+				android:id="@+id/ai_prompt_rewrite"
+				android:layout_width="0dp"
+				android:layout_height="match_parent"
+				android:layout_marginEnd="4dp"
+				android:layout_weight="1"
+				android:background="@drawable/suggestion_chip"
+				android:clickable="true"
+				android:focusable="true"
+				android:gravity="center"
+				android:text="Rewrite"
+				android:textColor="@android:color/black"
+				android:textSize="14sp" />
+
+			<TextView
+				android:id="@+id/ai_prompt_go"
+				android:layout_width="0dp"
+				android:layout_height="match_parent"
+				android:layout_weight="1"
+				android:background="@drawable/suggestion_chip"
+				android:clickable="true"
+				android:focusable="true"
+				android:gravity="center"
+				android:text="Go"
+				android:textColor="@android:color/black"
+				android:textSize="14sp"
+				android:textStyle="bold" />
+		</LinearLayout>
+	</LinearLayout>
+
+	<LinearLayout
+		android:id="@+id/suggestion_row"
+		android:layout_width="match_parent"
+		android:layout_height="48dp"
+		android:gravity="center_vertical"
+		android:orientation="horizontal"
+		android:paddingStart="6dp"
+		android:paddingEnd="6dp"
+		android:paddingTop="4dp"
+		android:paddingBottom="4dp">
+
+		<TextView
+			android:id="@+id/suggestion_0"
+			android:layout_width="0dp"
+			android:layout_height="match_parent"
+			android:layout_marginEnd="4dp"
+			android:layout_weight="1"
+			android:background="@drawable/suggestion_chip"
+			android:clickable="true"
+			android:ellipsize="end"
+			android:focusable="true"
+			android:gravity="center"
+			android:maxLines="1"
+			android:textColor="@android:color/black"
+			android:textSize="16sp"
+			android:visibility="invisible" />
+
+		<TextView
+			android:id="@+id/suggestion_1"
+			android:layout_width="0dp"
+			android:layout_height="match_parent"
+			android:layout_marginEnd="4dp"
+			android:layout_weight="1"
+			android:background="@drawable/suggestion_chip"
+			android:clickable="true"
+			android:ellipsize="end"
+			android:focusable="true"
+			android:gravity="center"
+			android:maxLines="1"
+			android:textColor="@android:color/black"
+			android:textSize="16sp"
+			android:visibility="invisible" />
+
+		<TextView
+			android:id="@+id/suggestion_2"
+			android:layout_width="0dp"
+			android:layout_height="match_parent"
+			android:layout_marginEnd="4dp"
+			android:layout_weight="1"
+			android:background="@drawable/suggestion_chip"
+			android:clickable="true"
+			android:ellipsize="end"
+			android:focusable="true"
+			android:gravity="center"
+			android:maxLines="1"
+			android:textColor="@android:color/black"
+			android:textSize="16sp"
+			android:visibility="invisible" />
+
+		<TextView
+			android:id="@+id/suggestion_ai"
+			android:layout_width="72dp"
+			android:layout_height="match_parent"
+			android:background="@drawable/suggestion_chip"
+			android:clickable="true"
+			android:contentDescription="AI complete"
+			android:focusable="true"
+			android:gravity="center"
+			android:text="AI"
+			android:textColor="@android:color/black"
+			android:textSize="15sp"
+			android:textStyle="bold" />
+	</LinearLayout>
+</LinearLayout>
