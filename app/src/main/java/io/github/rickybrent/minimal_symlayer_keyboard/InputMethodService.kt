@@ -450,6 +450,7 @@ class InputMethodService : AndroidInputMethodService() {
 	override fun onShowInputRequested(flags: Int, configChange: Boolean): Boolean {
 		if (pickerManager?.isShowing() == true || showToolbar) return true
 		if (suggestionsEligible() || aiPromptOpen) return true
+		if ((flags and SHOW_FORCED) != 0) return true
 		return super.onShowInputRequested(flags, configChange)
 	}
 
@@ -461,18 +462,30 @@ class InputMethodService : AndroidInputMethodService() {
 	}
 
 	private fun showEmojiPicker() {
-		if (isInputViewActive.not()) requestShowSelf(SHOW_FORCED)
-		pickerManager?.show()
+		openPicker(PickerManager.ViewType.EMOJI)
 	}
 
 	private fun showSymbolPicker() {
-		if (isInputViewActive.not()) requestShowSelf(SHOW_FORCED)
-		pickerManager?.show(PickerManager.ViewType.SYMBOL)
+		openPicker(PickerManager.ViewType.SYMBOL)
 	}
 
 	private fun showClipboardHistory() {
-		if (isInputViewActive.not()) requestShowSelf(SHOW_FORCED)
-		pickerManager?.show(PickerManager.ViewType.CLIPBOARD)
+		openPicker(PickerManager.ViewType.CLIPBOARD)
+	}
+
+	/**
+	 * Mark the picker visible first, then request the IME window.
+	 * Password fields reject a show request when the suggestion bar is
+	 * ineligible; asking before the picker is open left the grid hidden.
+	 */
+	private fun openPicker(type: PickerManager.ViewType) {
+		pickerManager?.show(type)
+		if (pickerManager?.isShowing() == true) {
+			requestShowSelf(SHOW_FORCED)
+			updateInputViewShown()
+		} else {
+			updateInputViewShown()
+		}
 	}
 
 	override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
@@ -1765,6 +1778,7 @@ class InputMethodService : AndroidInputMethodService() {
 		} else {
 			refreshSuggestions()
 		}
+		updateInputViewShown()
 	}
 
 	/**
