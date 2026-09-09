@@ -7,13 +7,21 @@ android {
 	namespace = "io.github.rickybrent.minimal_symlayer_keyboard"
 	compileSdk = 36
 
+	val localAiCa = file("src/main/res/raw/keyboard_ai_ca")
+	if (localAiCa.exists()) {
+		sourceSets.getByName("main").res.srcDir("src/localTrust/res")
+	}
+
 	defaultConfig {
 		applicationId = "io.github.rickybrent.minimal_symlayer_keyboard"
 		minSdk = 29
 		targetSdk = 33
 		versionCode = 1
-		versionName = "1.01"
+		versionName = "1.02"
 		testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+		manifestPlaceholders["networkSecurityConfig"] =
+			if (localAiCa.exists()) "@xml/network_security_config_local"
+			else "@xml/network_security_config"
 	}
 
 	buildTypes {

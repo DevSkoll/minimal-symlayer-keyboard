@@ -40,8 +40,6 @@ const val MP01_KEYCODE_EMOJI_PICKER = 666;
  */
 const val MP01_KEYCODE_DICTATE = 667;
 
-private const val IME_LOG = "SymKbd"
-
 // Only for modifier keys we want to force when using sym+keys to navigate.
 val forceModifierPairs = listOf(
 		KeyEvent.META_SHIFT_ON to KeyEvent.KEYCODE_SHIFT_LEFT,
@@ -340,7 +338,6 @@ class InputMethodService : AndroidInputMethodService() {
 	}
 
 	override fun onCreateInputView(): View {
-		Log.i(IME_LOG, "onCreateInputView pickerShowing=${pickerManager?.isShowing()}")
 		mainInputView = layoutInflater.inflate(R.layout.input_view_container, null)
 
 		val pickerContainer = mainInputView?.findViewById<FrameLayout>(R.id.picker_container_inline)
@@ -501,7 +498,6 @@ class InputMethodService : AndroidInputMethodService() {
 	 */
 	private fun openPicker(type: PickerManager.ViewType) {
 		val wasShowing = pickerManager?.isShowing() == true
-		Log.i(IME_LOG, "openPicker $type wasShowing=$wasShowing hasInputView=${mainInputView != null} inputType=${currentInputEditorInfo?.inputType}")
 		pickerManager?.show(type)
 		if (pickerManager?.isShowing() == true) {
 			pickerShowRequested = true
@@ -664,7 +660,6 @@ class InputMethodService : AndroidInputMethodService() {
 			sym.get() && event.keyCode == KeyEvent.KEYCODE_SPACE &&
 			!event.isLongPress && event.repeatCount == 0
 		) {
-			Log.i(IME_LOG, "SYM+SPACE picker inputType=${currentInputEditorInfo?.inputType}")
 			showSymbolPicker()
 			sym.reset()
 			updateStatusIconIfNeeded(true)

@@ -20,7 +20,7 @@ This fork builds upon the original's solid foundation with several new features 
 * **Sym-Layer Preview**: A visual preview of the Sym layer mappings, making it easy to discover and learn.
 * **On-device word suggestions**: A bottom suggestion bar with a bundled English dictionary. Idle chips predict the next word; while typing they complete the current word (or the closest dictionary word for a one-letter typo). Tap a chip to insert it. Autocorrect stays off. Local learning stays in app-private storage and is excluded from backup.
 * **Suggestion bar does not cover compose fields**: The bar is an IME candidates view, so messaging apps resize above it. Back hides the bar; typing brings it back. SYM+Space opens the on-screen symbol grid on the MP01, including in password fields (the suggestion/AI bar stays hidden there).
-* **Optional AI complete**: Off by default. If you set an HTTPS endpoint in settings, an AI chip appears on the bar. Nothing is sent unless you tap it. Point it at your own local API ([keyboard-ai](https://github.com/DevSkoll/keyboard-ai)) or leave it empty.
+* **Optional AI complete**: Off by default. If you set an HTTPS endpoint in settings, an AI chip appears on the bar. Nothing is sent unless you tap it. Point it at your own local API ([keyboard-ai](https://github.com/DevSkoll/keyboard-ai)) or leave it empty. The IME trusts the system CA store and user-installed CAs. A gitignored `app/src/main/res/raw/keyboard_ai_ca` is also trusted on local builds that include that file.
 * **Advanced Key Support for MP01**: Added support for the Minimal Phone's key layout, adding additional functionality over the factory keyboard:
     * **Three-Way Modifier Keys**: The Mic/Period and Emoji/0 keys act as multi-function modifiers:
         * **Mic/Period Key**:
@@ -57,7 +57,7 @@ This MP01-oriented fork is maintained by Dev_Skoll. Upstream is [rickybrent/mini
 * **Keyboard Navigation**: simulate arrow keys and home/end/page up/page down keys, using the `sym` modifier - especially useful with an e-ink screen.
 * Lock modifier keys by double-tapping them, while a single tap will only have effect for the next key press.
 * See modifier key state in the status bar.
-* Auto-capitalization of the first letter of a sentence.x	
+* Auto-capitalization of the first letter of a sentence.
 * Two spaces after a period automatically replaced by a period and a space.
 
 ## `sym` modifier map and `emoji` shortcuts

@@ -43,7 +43,7 @@ class KeyboardAiClient {
 					main.post { onResult(completion) }
 					return@execute
 				} catch (e: Exception) {
-					lastError = e.message ?: e.javaClass.simpleName
+					lastError = describeError(e)
 					Log.w(TAG, "complete via $base failed", e)
 				}
 			}
@@ -99,6 +99,19 @@ class KeyboardAiClient {
 				base = "https://" + base.removePrefix("http://")
 			}
 			return listOf(base)
+		}
+
+		internal fun describeError(e: Exception): String {
+			val text = generateSequence(e as Throwable) { it.cause }
+				.mapNotNull { it.message }
+				.joinToString(" ")
+			return when {
+				text.contains("Trust anchor") || text.contains("CertPathValidator") ->
+					"TLS: certificate not trusted"
+				text.contains("Hostname") && text.contains("verif", ignoreCase = true) ->
+					"TLS: hostname does not match certificate"
+				else -> (e.message ?: e.javaClass.simpleName).take(160)
+			}
 		}
 	}
 }
